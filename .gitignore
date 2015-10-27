@@ -1,9 +1,20 @@
+## Data files
+*.zip
+*.csv
+
+## Miscelaneous Things
+*.docx
+*.doc
+*.pdf
+
+## R-related Things
 # History files
 .Rhistory
 .Rapp.history
 
 # Example code in package build process
 *-Ex.R
+
 
 # RStudio files
 .Rproj.user/
