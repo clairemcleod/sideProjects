@@ -2,6 +2,10 @@
 *.zip
 *.csv
 
+##Individual Files
+sample_code_library.R
+sample_code.R
+
 ## Miscelaneous Things
 *.docx
 *.doc
