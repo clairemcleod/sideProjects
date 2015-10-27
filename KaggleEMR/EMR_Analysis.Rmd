@@ -3,16 +3,10 @@ title: "EMR_Analysis"
 output: html_document
 ---
 
-This is a test commit directly from R. 
+Materials
+In 2012, Kaggle hosted a EMR-based competition (https://www.kaggle.com/c/pf2012). They provided de-identified data for 9k+ patients, and posed the question of 'Who has diabetes?'. The data were provided in 19 tables for the provided training and test sets:
 
 ```{r}
-summary(cars)
+library(RSQLite)
+grep("test", dbListTables(con), value=T)
 ```
-
-You can also embed plots, for example:
-
-```{r, echo=FALSE}
-plot(cars)
-```
-
-Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
