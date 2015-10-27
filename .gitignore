@@ -1,6 +1,8 @@
 ## Data files
 *.zip
 *.csv
+*.db
+*.sql
 
 ##Individual Files
 sample_code_library.R
@@ -22,7 +24,7 @@ sample_code.R
 
 # RStudio files
 .Rproj.user/
-.Rproj
+*.Rproj
 
 # produced vignettes
 vignettes/*.html
