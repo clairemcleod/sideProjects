@@ -1,0 +1,188 @@
+
+
+```{r, echo=FALSE, message=FALSE}
+library(chron) #helpful reference: #http://www.stat.berkeley.edu/~s133/dates.html
+library(ggplot2)
+library(stringr)
+library(gdata)
+library(plyr)
+```
+
+Import the race results (parsed from HTML via python's BeautifulSoup), corral assignments, and the time windows associated with each corral.
+
+```{r}
+setwd("/Users/clmcleod/GitHub/sideProjects/Running/RunningData/PhillyMarathon2014/")
+fullResults <- read.csv("Philly2014RaceResults-HTML/fullResults.csv")
+
+corralAssignments <- read.csv("corralAssignments.csv")
+
+predict <- read.csv("corralPredictions.csv")
+
+predict[, 2:5] <- lapply(predict[,2:5], 
+                         function(x){as.POSIXct(strptime(x, '%H:%M:%S'))} )
+```
+
+
+Clean up the data. Two individuals have NA bib numbers due to legacy quaalification.
+```{r, warning = FALSE}
+#remove leading spaces
+corralAssignments <- trim(corralAssignments)
+corralAssignments$registration <- gsub("Half Marathon", "Half", corralAssignments$registration)
+
+# remove 8k results, since we aren't interested in those
+c<-subset(corralAssignments, registration %in% c("Half", "Marathon"))
+```
+
+Now, match the registrant and finisher data by merging across bib number. Make sure the demographic information matches across the two tables - it doesn't always, and we'll remove these results.
+```{r, message=FALSE, warning=FALSE}
+#match up registration with results info by bib #
+#the NAs introduced by coercion here are the 2 legacy runners
+fullResults$match<-as.integer(fullResults$bib)
+c$match<-as.numeric( levels(c$bib) )[c$bib]
+m <- merge(fullResults, c, by.x = "match", by.y = "match", sort=TRUE)
+
+#flag observation as suspicious if sex and age aren't consistent b/w data sources
+m$flag <- ( m$sex.x == m$sex.y  &  abs(m$age.x-m$age.y)<2 )
+suspicious <- m[!m$flag, ]
+
+#clean is a data frame that contains both half and full marathon data, for finishers and non-finishers
+#we've removed the legacy runners and the registrants who had inconsistent demographic information
+clean<-m[m$flag, ]
+```
+
+Next, convert the HH:MM:SS times to just seconds for easier modeling later. These functions were taken directly from http://stackoverflow.com/questions/10835908/is-there-a-way-to-convert-mmss-00-to-seconds-00-in-r
+
+```{r, echo=FALSE}
+toSeconds <- function(x){
+   if (!is.character(x)) stop("x must be a character string of the form H:M:S")
+   if (length(x)<=0) return(x)
+
+   unlist(
+      lapply(x,
+         function(i){
+            i <- as.numeric(strsplit(i,':',fixed=TRUE)[[1]])
+            if (length(i) == 3) 
+               i[1]*3600 + i[2]*60 + i[3]
+            else if (length(i) == 2) 
+               i[1]*60 + i[2]
+            else if (length(i) == 1) 
+               i[1]
+            else if (length(i) == 0)
+                NA
+         }  
+      )  
+   )  
+} 
+
+secondsToString <- function(x,digits=2){
+   unlist(
+      lapply(x,
+         function(i){
+            # fractional seconds
+            fs <- as.integer(round((i - round(i))*(10^digits)))
+            fmt <- ''
+            if (i >= 3600)
+               fmt <- '%H:%M:%S'
+            else if (i >= 60)
+            fmt <- '%M:%S'
+            else
+               fmt <- '%OS'
+
+            i <- format(as.POSIXct(strptime("0:0:0","%H:%M:%S")) + i, format=fmt)
+            if (fs > 0)
+               sub('[0]+$','',paste(i,fs,sep='.'))
+            else
+               i
+         }
+      )
+   )
+}
+```
+
+```{r}
+clean$netTime<- as.POSIXct(strptime(clean$net, '%H:%M:%S'))
+clean$netSec <- toSeconds(as.character(clean$net))
+```
+
+Now, we'll create a designation for registrants who didn't finish (DNF). Now we have all the pieces necessary to create a graph showing finisher outcomes. We can also tabulate the data directly.
+```{r}
+# if a participant had a net time of "", change event to DNF
+# (need to add DNF as a level first)
+levels(clean$event) <- c(levels(clean$event), "DNF")
+clean$event[clean$net == ""] = "DNF"
+clean$DNF = ifelse(clean$net == "", 1, 0)
+
+#bar plot of registration-finisher data
+ggplot(clean)+
+  geom_bar(aes(x=registration, stat="bin", fill=event))+
+  ylab("# Participants")+
+  xlab("Registered Event")+
+  guides(fill=guide_legend(title="Actually Ran"))
+
+clean$reg.ran <- interaction(clean$registration, clean$event)
+summary(clean$reg.ran)
+
+#remove some duplicate fields from the dataset
+drops <- c("bib.x", "sex.x", "age.x", "match", "flag")
+clean <- clean[, !names(clean) %in% drops]
+clean <- rename(clean, c("sex.y" = "sex", "age.y"="age", "bib.y"="bib"))
+```
+
+I think a much better visualization for this is a Sankey diagram. I used a great online tool called Sankeymatic - here's the input for that.
+```{r}
+# http://sankeymatic.com/
+# 
+# Marathon Registrants[10048] Marathon Finishers #8904B1
+# Marathon Registrants[1172] Half Marathon Finishers #8904B1
+# Marathon Registrants [2797] DNF #8904B1
+# Marathon Registrants [2] 8k Finishers
+# 
+# Half Marathon Registrants [11228] Half Marathon Finishers #04B431
+# Half Marathon Registrants [2795] DNF #04B431
+# Half Marathon Registrants [28] 8k Finishers #04B431
+# 
+# 8k Registrants [1670] 8k Finishers #045FB4
+# 8k Registrants [644] DNF #045FB4
+# 
+# :DNF #848484
+# :Half Marathon Finishers #04B431
+# :Half Marathon Registrants #04B431
+# :Marathon Finishers #8904B1
+# :Marathon Registrants #8904B1
+```
+
+Finally, some quick linear modeling ... 
+
+```{r}
+#r.mar contains just data for marathon finishers
+r.mar <- clean[ clean$reg.ran %in% c("Marathon.Marathon"), ]
+
+summary(lm( netSec ~  sex * age, data = r.mar))
+
+summary(lm( netSec ~  corral, data = r.mar))
+
+# does demographic information predict who finishes?
+marathon.registrants <- clean[ clean$registration %in% c("Marathon"),]
+summary(glm(DNF ~ sex * age, family = "binomial", data = marathon.registrants))
+```
+
+... and some graphs of marathon finish time as a function of age and gender:
+
+```{r}
+
+
+ggplot(r.mar)+
+  geom_density2d(aes(x=age, y= netSec, color=sex) ) +
+  geom_point(aes(x=age, y=netSec), alpha = 0.02, size = 3) +
+  facet_grid(.~sex)+
+  ylab("Time (seconds)")+
+  xlab("Age")
+
+ggplot(data = r.mar, aes(x=age, y= netSec)) +
+  stat_density2d(geom="tile", aes(fill = ..density..), contour = FALSE)+
+  facet_grid(.~sex)+
+  ylab("Time (seconds)")+
+  xlab("Age")
+```
+
+
